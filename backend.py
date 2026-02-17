@@ -1,91 +1,171 @@
 """
 backend.py
-
-This file contains all database-related business logic functions:
-- Database connection
-- Policy validation
-- Claim creation
-- Ticket creation
+SQLite-based backend for Insurance Saathi
+Fully cloud deployable
 """
 
-import pyodbc
+import sqlite3
+import random
+from datetime import datetime, timedelta
 
-# ---------------------------------------------------------
-# Database Connection Function
-# ---------------------------------------------------------
-def get_connection():
+DB_NAME = "insurance.db"
+
+
+# -----------------------------
+# DATABASE INITIALIZATION
+# -----------------------------
+
+def init_db():
     """
-    Establishes connection to SQL Server database.
-    Returns a connection object.
-    """
-    return pyodbc.connect(
-        "DRIVER={ODBC Driver 17 for SQL Server};"
-        "SERVER=localhost;"
-        "DATABASE=VehicleInsuranceDB;"
-        "Trusted_Connection=yes;"
-    )
-
-
-# ---------------------------------------------------------
-# Validate Policy
-# ---------------------------------------------------------
-def validate_policy(policy_id):
-    """
-    Checks:
-    1. If policy exists
-    2. If policy is active
-
-    Returns:
-    (True, policy_object)  -> if valid
-    (False, error_message) -> if invalid
+    Creates tables if they do not exist
+    and populates 1000 policies (only once)
     """
 
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM Policy_Master WHERE Policy_ID = ?", policy_id)
-    policy = cursor.fetchone()
+    # Create Policy table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Policy_Master (
+            Policy_ID TEXT PRIMARY KEY,
+            Customer_Name TEXT,
+            Vehicle_Number TEXT,
+            Coverage_Type TEXT,
+            Start_Date TEXT,
+            Expiry_Date TEXT,
+            Insured_Amount REAL,
+            Status TEXT
+        )
+    """)
 
+    # Create Claims table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Claims (
+            Claim_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+            Policy_ID TEXT,
+            Damage_Class TEXT,
+            Confidence REAL,
+            Claim_Status TEXT,
+            Created_At TEXT
+        )
+    """)
+
+    # Create Tickets table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Tickets (
+            Ticket_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+            Claim_ID INTEGER,
+            Assigned_To TEXT,
+            Ticket_Status TEXT,
+            Created_At TEXT
+        )
+    """)
+
+    # Check if policies already exist
+    cursor.execute("SELECT COUNT(*) FROM Policy_Master")
+    count = cursor.fetchone()[0]
+
+    if count == 0:
+        generate_policies(cursor)
+
+    conn.commit()
     conn.close()
 
-    # If policy does not exist
+
+# -----------------------------
+# GENERATE 1000 POLICIES
+# -----------------------------
+
+def generate_policies(cursor):
+
+    for i in range(1000):
+
+        policy_id = f"POL{10000 + i}"
+        customer_name = f"Customer_{i+1}"
+        vehicle_number = f"MH{random.randint(10,99)}AB{random.randint(1000,9999)}"
+        coverage_type = random.choice(["Comprehensive", "Third Party"])
+
+        start_date = datetime.now() - timedelta(days=random.randint(30, 365))
+        expiry_date = start_date + timedelta(days=365)
+
+        insured_amount = random.randint(200000, 1500000)
+        status = "Active" if expiry_date > datetime.now() else "Expired"
+
+        cursor.execute("""
+            INSERT INTO Policy_Master
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            policy_id,
+            customer_name,
+            vehicle_number,
+            coverage_type,
+            start_date.strftime("%Y-%m-%d"),
+            expiry_date.strftime("%Y-%m-%d"),
+            insured_amount,
+            status
+        ))
+
+
+# -----------------------------
+# VALIDATE POLICY
+# -----------------------------
+
+def validate_policy(policy_id):
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT * FROM Policy_Master WHERE Policy_ID = ?",
+        (policy_id,)
+    )
+
+    policy = cursor.fetchone()
+    conn.close()
+
     if not policy:
         return False, "Policy Not Found"
 
-    # If policy expired
-    if policy.Status != "Active":
+    if policy[7] != "Active":
         return False, "Policy Expired"
 
-    return True, policy
+    # Convert tuple to object-like dict
+    policy_data = {
+        "Customer_Name": policy[1],
+        "Vehicle_Number": policy[2],
+        "Coverage_Type": policy[3],
+        "Start_Date": policy[4],
+        "Expiry_Date": policy[5],
+        "Insured_Amount": policy[6]
+    }
+
+    return True, policy_data
 
 
-# ---------------------------------------------------------
-# Create Claim
-# ---------------------------------------------------------
+# -----------------------------
+# CREATE CLAIM
+# -----------------------------
+
 def create_claim(policy_id, damage_class, confidence):
-    """
-    Inserts a new claim into Claims table.
 
-    Approval logic:
-    - If confidence > 0.5 → Approved
-    - Else → Under Review
-
-    Returns:
-    claim_id (int)
-    """
-
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
     claim_status = "Approved" if confidence > 0.5 else "Under Review"
 
     cursor.execute("""
-        INSERT INTO Claims (Policy_ID, Damage_Class, Confidence, Claim_Status)
-        OUTPUT INSERTED.Claim_ID
-        VALUES (?, ?, ?, ?)
-    """, policy_id, damage_class, confidence, claim_status)
+        INSERT INTO Claims
+        (Policy_ID, Damage_Class, Confidence, Claim_Status, Created_At)
+        VALUES (?, ?, ?, ?, ?)
+    """, (
+        policy_id,
+        damage_class,
+        confidence,
+        claim_status,
+        datetime.now().strftime("%Y-%m-%d %H:%M")
+    ))
 
-    claim_id = cursor.fetchone()[0]
+    claim_id = cursor.lastrowid
 
     conn.commit()
     conn.close()
@@ -93,28 +173,27 @@ def create_claim(policy_id, damage_class, confidence):
     return claim_id
 
 
-# ---------------------------------------------------------
-# Create Ticket
-# ---------------------------------------------------------
+# -----------------------------
+# CREATE TICKET
+# -----------------------------
+
 def create_ticket(claim_id):
-    """
-    Creates a ticket for a claim.
-    Assigns to default Claims Officer.
 
-    Returns:
-    ticket_id (int)
-    """
-
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
     cursor.execute("""
-        INSERT INTO Tickets (Claim_ID, Assigned_To, Ticket_Status)
-        OUTPUT INSERTED.Ticket_ID
-        VALUES (?, ?, ?)
-    """, claim_id, "Claims Officer 1", "Open")
+        INSERT INTO Tickets
+        (Claim_ID, Assigned_To, Ticket_Status, Created_At)
+        VALUES (?, ?, ?, ?)
+    """, (
+        claim_id,
+        "Claims Officer 1",
+        "Open",
+        datetime.now().strftime("%Y-%m-%d %H:%M")
+    ))
 
-    ticket_id = cursor.fetchone()[0]
+    ticket_id = cursor.lastrowid
 
     conn.commit()
     conn.close()
