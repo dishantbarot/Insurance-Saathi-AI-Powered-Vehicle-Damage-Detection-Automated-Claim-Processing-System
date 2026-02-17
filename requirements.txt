@@ -1,4 +1,8 @@
- streamlit 
- ultralytics 
- reportlab 
- pillow
+streamlit
+ultralytics
+reportlab
+pillow
+numpy
+opencv-python-headless
+pyodbc
+torch
