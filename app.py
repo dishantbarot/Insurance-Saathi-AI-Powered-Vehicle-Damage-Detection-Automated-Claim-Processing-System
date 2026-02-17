@@ -277,16 +277,3 @@ if page == "Admin Dashboard":
 
     conn.close()
 
-st.markdown("---")
-st.subheader("⬇️ Download Database")
-
-with open(DB_NAME, "rb") as f:
-    st.download_button(
-        label="Download insurance.db",
-        data=f,
-        file_name="insurance.db",
-        mime="application/octet-stream"
-    )
-
-
-
