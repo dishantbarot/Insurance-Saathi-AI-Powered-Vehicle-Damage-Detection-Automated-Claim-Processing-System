@@ -1,238 +1,220 @@
 """
-Insurance Saathi - AI Powered Car Insurance
-Streamlit Frontend Application
+Insurance Saathi
+AI Powered Vehicle Damage Detection & Claim Automation
 """
 
-from backend import init_db
-init_db()
+# -------------------------------------------------
+# IMPORTS
+# -------------------------------------------------
+
 import streamlit as st
-from ultralytics import YOLO
-from backend import validate_policy, create_claim, create_ticket
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.units import inch
-from datetime import datetime
-from PIL import Image as PILImage
 import numpy as np
-import os
-
-# -------------------------
-# SIDEBAR NAVIGATION
-# -------------------------
-
-page = st.sidebar.selectbox(
-    "Navigation",
-    ["Insurance Portal", "Admin Dashboard"]
+from ultralytics import YOLO
+from backend import (
+    init_db,
+    validate_policy,
+    create_claim,
+    create_ticket,
+    DB_NAME
 )
+from PIL import Image as PILImage
+from datetime import datetime
+import sqlite3
+
+# PDF
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
 
 
+# -------------------------------------------------
+# INITIAL SETUP
+# -------------------------------------------------
 
-# -------------------------------------------------------
-# PAGE CONFIGURATION
-# -------------------------------------------------------
+st.set_page_config(page_title="Insurance Saathi", page_icon="🚗", layout="centered")
+
+# Initialize database (auto create + auto generate 1000 policies)
+init_db()
+
+# -------------------------------------------------
+# SESSION STATE INITIALIZATION
+# -------------------------------------------------
+
+if "policy_valid" not in st.session_state:
+    st.session_state.policy_valid = False
+
+if "policy_id" not in st.session_state:
+    st.session_state.policy_id = None
+
+if "damage_class" not in st.session_state:
+    st.session_state.damage_class = None
+
+if "confidence" not in st.session_state:
+    st.session_state.confidence = None
+
+if "image" not in st.session_state:
+    st.session_state.image = None
+
+
+# -------------------------------------------------
+# SIDEBAR NAVIGATION
+# -------------------------------------------------
+
+page = st.sidebar.selectbox("Navigation", ["Insurance Portal", "Admin Dashboard"])
+
+
+# -------------------------------------------------
+# LOAD YOLO MODEL (Cached)
+# -------------------------------------------------
+
+@st.cache_resource
+def load_model():
+    return YOLO("model/best.pt")
+
+model = load_model()
+
+
+# =================================================
+# =============== INSURANCE PORTAL ===============
+# =================================================
+
 if page == "Insurance Portal":
-    # Your existing insurance app code here
 
-    st.set_page_config(
-        page_title="Insurance Saathi",
-        page_icon="🚗",
-        layout="centered"
+    # ---------------- HEADER ----------------
+    col1, col2, col3 = st.columns([1,2,1])
+
+    with col2:
+        logo = PILImage.open("assets/Insurance_saathi logo.png")
+        st.image(logo, width=150)
+
+    st.markdown("<h1 style='text-align:center;'>Insurance Saathi</h1>", unsafe_allow_html=True)
+    st.markdown(
+        "<p style='text-align:center; color:#00D4FF;'>AI Powered Car Insurance Automation System</p>",
+        unsafe_allow_html=True
     )
-    
-    # -------------------------------------------------------
-    # CUSTOM CSS (Futuristic + Minimalist)
-    # -------------------------------------------------------
-    
-    st.markdown("""
-    <style>
-    body {
-        background-color: #0E1117;
-        color: white;
-    }
-    .big-title {
-        font-size: 42px;
-        font-weight: 700;
-        text-align: center;
-    }
-    .subtitle {
-        text-align: center;
-        font-size: 18px;
-        color: #00D4FF;
-    }
-    .section {
-        background-color: #161B22;
-        padding: 25px;
-        border-radius: 12px;
-        margin-top: 20px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # -------------------------------------------------------
-    # HEADER SECTION
-    # -------------------------------------------------------
-    
-    logo = PILImage.open("assets/Insurance_saathi logo.png")
-    st.image(logo, width=180)
-    
-    st.markdown("<div class='big-title'>Insurance Saathi</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>AI Powered Car Insurance Automation System</div>", unsafe_allow_html=True)
-    
+
     st.markdown("---")
-    
-    # -------------------------------------------------------
-    # LOAD MODEL
-    # -------------------------------------------------------
-    
-    @st.cache_resource
-    def load_model():
-        return YOLO("model/best.pt")
-    
-    model = load_model()
-    
-    # -------------------------------------------------------
-    # POLICY VALIDATION SECTION
-    # -------------------------------------------------------
-    
-    st.markdown("<div class='section'>", unsafe_allow_html=True)
+
+    # ---------------- POLICY VALIDATION ----------------
+
     st.subheader("🔎 Policy Verification")
-    
+
     policy_number = st.text_input("Enter Policy Number")
-    
+
     if st.button("Validate Policy"):
+
         valid, result = validate_policy(policy_number)
-    
+
         if valid:
             st.success("✅ Policy is Valid")
-    
-            st.write("**Customer Name:**", result.Customer_Name)
-            st.write("**Vehicle Number:**", result.Vehicle_Number)
-            st.write("**Coverage Type:**", result.Coverage_Type)
-            st.write("**Expiry Date:**", result.Expiry_Date)
-            st.write("**Insured Amount:** ₹", result.Insured_Amount)
-    
-            st.session_state["policy_valid"] = True
-            st.session_state["policy_id"] = policy_number
-    
+
+            st.write("**Customer Name:**", result["Customer_Name"])
+            st.write("**Vehicle Number:**", result["Vehicle_Number"])
+            st.write("**Coverage Type:**", result["Coverage_Type"])
+            st.write("**Expiry Date:**", result["Expiry_Date"])
+            st.write("**Insured Amount:** ₹", result["Insured_Amount"])
+
+            st.session_state.policy_valid = True
+            st.session_state.policy_id = policy_number
+
         else:
             st.error(result)
-            st.session_state["policy_valid"] = False
-    
-    st.markdown("</div>", unsafe_allow_html=True)
-    
-    # -------------------------------------------------------
-    # DAMAGE DETECTION SECTION
-    # -------------------------------------------------------
-    
-    uploaded_file = st.file_uploader(
-        "Upload vehicle damage image",
-        type=["jpg", "jpeg", "png"]
-    )
-    
-    if uploaded_file is not None:
-    
-        try:
-            image = PILImage.open(uploaded_file).convert("RGB")
-            image_np = np.array(image)
-    
-            results = model(image_np)
-            result = results[0]
-    
-            # Check properly
-            if result.boxes is not None and len(result.boxes) > 0:
-    
-                boxes = result.boxes
-    
-                cls_id = int(boxes.cls[0])
-                confidence = float(boxes.conf[0])
-                class_name = model.names[cls_id]
-    
-                st.image(result.plot(), caption="Detected Damage", use_container_width=True)
-    
-                st.success(f"Damage Detected: {class_name}")
-                st.write(f"Confidence Score: {round(confidence, 2)}")
-    
-                st.session_state["damage_class"] = class_name
-                st.session_state["confidence"] = confidence
-    
-                # -------------------------------------------------------
-                # CLAIM DECISION
-                # -------------------------------------------------------
-    
-                claim_option = st.radio(
-                    "Do you want to proceed with the claim?",
-                    ["Yes", "No"]
-                )
-    
-                if claim_option == "Yes":
-    
-                    claim_id = create_claim(
-                        st.session_state["policy_id"],
-                        class_name,
-                        confidence
-                    )
-    
-                    ticket_id = create_ticket(claim_id)
-    
-                    st.success(f"🎫 Claim Created Successfully! Claim ID: {claim_id}")
-    
-                    # -------------------------------------------------------
-                    # PDF GENERATION
-                    # -------------------------------------------------------
-    
-                    pdf_path = f"claim_{claim_id}.pdf"
-                    doc = SimpleDocTemplate(pdf_path)
-                    elements = []
-    
-                    styles = getSampleStyleSheet()
-    
-                    elements.append(Paragraph("Insurance Saathi - Claim Report", styles["Title"]))
-                    elements.append(Spacer(1, 0.3 * inch))
-                    elements.append(Paragraph(f"Policy ID: {st.session_state['policy_id']}", styles["Normal"]))
-                    elements.append(Paragraph(f"Damage Type: {class_name}", styles["Normal"]))
-                    elements.append(Paragraph(f"Confidence: {round(confidence,2)}", styles["Normal"]))
-                    elements.append(Paragraph(f"Claim ID: {claim_id}", styles["Normal"]))
-                    elements.append(Paragraph(f"Date: {datetime.now()}", styles["Normal"]))
-    
-                    doc.build(elements)
-    
-                    with open(pdf_path, "rb") as f:
-                        st.download_button(
-                            label="📄 Download Claim Report (PDF)",
-                            data=f,
-                            file_name=pdf_path,
-                            mime="application/pdf"
-                        )
-    
-                else:
-                    st.info("Thank you for visiting Insurance Saathi 🚗")
-    
-            else:
-                st.warning("No visible damage detected in the image.")
-    
-        except Exception as e:
-            st.error("Error processing image.")
-            st.exception(e)
-    
-        st.markdown("</div>", unsafe_allow_html=True)
+            st.session_state.policy_valid = False
+            st.session_state.policy_id = None
 
-# -------------------------
-# ADMIN DASHBOARD
-# -------------------------
+
+    # ---------------- DAMAGE DETECTION ----------------
+
+    if st.session_state.policy_valid:
+
+        st.markdown("---")
+        st.subheader("📸 Upload Damage Image")
+
+        uploaded_file = st.file_uploader("Upload vehicle damage image", type=["jpg", "jpeg", "png"])
+
+        if uploaded_file is not None:
+
+            try:
+                image = PILImage.open(uploaded_file).convert("RGB")
+                image_np = np.array(image)
+
+                results = model(image_np)
+                result = results[0]
+
+                if result.boxes is not None and len(result.boxes) > 0:
+
+                    boxes = result.boxes
+                    cls_id = int(boxes.cls[0])
+                    confidence = float(boxes.conf[0])
+                    class_name = model.names[cls_id]
+
+                    st.image(result.plot(), width="stretch")
+
+                    st.success(f"Damage Detected: {class_name}")
+                    st.write(f"Confidence Score: {round(confidence, 2)}")
+
+                    st.session_state.damage_class = class_name
+                    st.session_state.confidence = confidence
+                    st.session_state.image = image
+
+                else:
+                    st.warning("No visible damage detected.")
+
+            except Exception as e:
+                st.error("Error processing image.")
+                st.exception(e)
+
+
+    # ---------------- CLAIM DECISION ----------------
+
+    if (
+        st.session_state.policy_valid
+        and st.session_state.policy_id is not None
+        and st.session_state.damage_class is not None
+    ):
+
+        st.markdown("---")
+        st.subheader("📝 Claim Decision")
+
+        choice = st.radio("Proceed with claim?", ["Select", "Yes", "No"])
+
+        if choice == "Yes":
+
+            if st.button("Submit Claim"):
+
+                claim_id = create_claim(
+                    st.session_state.policy_id,
+                    st.session_state.damage_class,
+                    st.session_state.confidence
+                )
+
+                ticket_id = create_ticket(claim_id)
+
+                st.success(f"🎫 Claim Created Successfully! Claim ID: {claim_id}")
+
+                generate_pdf(
+                    claim_id,
+                    st.session_state.policy_id,
+                    st.session_state.damage_class,
+                    st.session_state.confidence,
+                    st.session_state.image
+                )
+
+        elif choice == "No":
+            st.info("Thank you for using Insurance Saathi 🚗")
+
+
+# =================================================
+# =============== ADMIN DASHBOARD ===============
+# =================================================
 
 if page == "Admin Dashboard":
-
-    import sqlite3
-    from backend import DB_NAME
 
     st.title("📊 Admin Dashboard")
 
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-
-    # -------------------------
-    # KPI SECTION
-    # -------------------------
 
     cursor.execute("SELECT COUNT(*) FROM Policy_Master")
     total_policies = cursor.fetchone()[0]
@@ -244,36 +226,78 @@ if page == "Admin Dashboard":
     total_tickets = cursor.fetchone()[0]
 
     col1, col2, col3 = st.columns(3)
-
     col1.metric("Total Policies", total_policies)
     col2.metric("Total Claims", total_claims)
     col3.metric("Total Tickets", total_tickets)
 
     st.markdown("---")
 
-    # -------------------------
-    # CLAIMS TABLE
-    # -------------------------
-
-    st.subheader("📝 Claims Table")
-
+    st.subheader("Claims Table")
     cursor.execute("SELECT * FROM Claims ORDER BY Claim_ID DESC")
-    claims = cursor.fetchall()
+    st.dataframe(cursor.fetchall())
 
-    st.dataframe(claims)
-
-    st.markdown("---")
-
-    # -------------------------
-    # TICKETS TABLE
-    # -------------------------
-
-    st.subheader("🎫 Tickets Table")
-
+    st.subheader("Tickets Table")
     cursor.execute("SELECT * FROM Tickets ORDER BY Ticket_ID DESC")
-    tickets = cursor.fetchall()
-
-    st.dataframe(tickets)
+    st.dataframe(cursor.fetchall())
 
     conn.close()
 
+
+# =================================================
+# =============== PDF FUNCTION ===============
+# =================================================
+
+def generate_pdf(claim_id, policy_id, damage_class, confidence, image):
+
+    pdf_path = f"claim_{claim_id}.pdf"
+    doc = SimpleDocTemplate(pdf_path)
+    elements = []
+
+    styles = getSampleStyleSheet()
+
+    centered = ParagraphStyle(
+        name="Centered",
+        parent=styles["Heading1"],
+        alignment=1,
+        textColor=colors.HexColor("#0A84FF")
+    )
+
+    subtitle = ParagraphStyle(
+        name="Subtitle",
+        parent=styles["Normal"],
+        alignment=1,
+        textColor=colors.grey
+    )
+
+    logo = RLImage("assets/Insurance_saathi logo.png", width=1.5*inch, height=1.5*inch)
+    logo.hAlign = 'CENTER'
+    elements.append(logo)
+    elements.append(Spacer(1, 0.3 * inch))
+
+    elements.append(Paragraph("Insurance Saathi", centered))
+    elements.append(Paragraph("AI Powered Car Insurance Automation System", subtitle))
+    elements.append(Spacer(1, 0.5 * inch))
+
+    elements.append(Paragraph(f"<b>Policy ID:</b> {policy_id}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Damage Type:</b> {damage_class}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Confidence:</b> {round(confidence,2)}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Claim ID:</b> {claim_id}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%d-%m-%Y %H:%M')}", styles["Normal"]))
+    elements.append(Spacer(1, 0.5 * inch))
+
+    temp_img = f"damage_{claim_id}.jpg"
+    image.save(temp_img)
+
+    damage_img = RLImage(temp_img, width=4*inch, height=3*inch)
+    damage_img.hAlign = 'CENTER'
+    elements.append(damage_img)
+
+    doc.build(elements)
+
+    with open(pdf_path, "rb") as f:
+        st.download_button(
+            "📄 Download Claim Report",
+            data=f,
+            file_name=pdf_path,
+            mime="application/pdf"
+        )
