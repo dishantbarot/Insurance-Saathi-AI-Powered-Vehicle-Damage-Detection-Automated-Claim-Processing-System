@@ -4,5 +4,4 @@ reportlab
 pillow
 numpy
 opencv-python-headless
-pyodbc
 torch
