@@ -2,15 +2,6 @@
 Insurance Saathi - AI Powered Car Insurance
 Streamlit Frontend Application
 """
-# -------------------------
-# SIDEBAR NAVIGATION
-# -------------------------
-
-page = st.sidebar.selectbox(
-    "Navigation",
-    ["Insurance Portal", "Admin Dashboard"]
-)
-
 
 from backend import init_db
 init_db()
@@ -24,6 +15,15 @@ from datetime import datetime
 from PIL import Image as PILImage
 import numpy as np
 import os
+
+# -------------------------
+# SIDEBAR NAVIGATION
+# -------------------------
+
+page = st.sidebar.selectbox(
+    "Navigation",
+    ["Insurance Portal", "Admin Dashboard"]
+)
 
 
 
@@ -287,5 +287,6 @@ with open(DB_NAME, "rb") as f:
         file_name="insurance.db",
         mime="application/octet-stream"
     )
+
 
 
