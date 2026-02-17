@@ -3,12 +3,14 @@ Insurance Saathi
 AI Powered Vehicle Damage Detection & Claim Automation
 """
 
-# -------------------------------------------------
+# =================================================
 # IMPORTS
-# -------------------------------------------------
+# =================================================
 
 import streamlit as st
 import numpy as np
+import sqlite3
+import base64
 from ultralytics import YOLO
 from backend import (
     init_db,
@@ -19,7 +21,6 @@ from backend import (
 )
 from PIL import Image as PILImage
 from datetime import datetime
-import sqlite3
 
 # PDF
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
@@ -28,18 +29,74 @@ from reportlab.lib.units import inch
 from reportlab.lib import colors
 
 
-# -------------------------------------------------
+# =================================================
+# PDF FUNCTION (DEFINED FIRST TO AVOID NameError)
+# =================================================
+
+def generate_pdf(claim_id, policy_id, damage_class, confidence, image):
+
+    pdf_path = f"claim_{claim_id}.pdf"
+    doc = SimpleDocTemplate(pdf_path)
+    elements = []
+
+    styles = getSampleStyleSheet()
+
+    centered = ParagraphStyle(
+        name="Centered",
+        parent=styles["Heading1"],
+        alignment=1,
+        textColor=colors.HexColor("#0A84FF")
+    )
+
+    subtitle = ParagraphStyle(
+        name="Subtitle",
+        parent=styles["Normal"],
+        alignment=1,
+        textColor=colors.grey
+    )
+
+    # Centered Logo
+    logo = RLImage("assets/Insurance_saathi logo.png", width=1.5*inch, height=1.5*inch)
+    logo.hAlign = 'CENTER'
+    elements.append(logo)
+    elements.append(Spacer(1, 0.3 * inch))
+
+    # Title & Subtitle
+    elements.append(Paragraph("Insurance Saathi", centered))
+    elements.append(Paragraph("AI Powered Car Insurance Automation System", subtitle))
+    elements.append(Spacer(1, 0.5 * inch))
+
+    elements.append(Paragraph(f"<b>Policy ID:</b> {policy_id}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Damage Type:</b> {damage_class}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Confidence:</b> {round(confidence,2)}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Claim ID:</b> {claim_id}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%d-%m-%Y %H:%M')}", styles["Normal"]))
+    elements.append(Spacer(1, 0.5 * inch))
+
+    temp_img = f"damage_{claim_id}.jpg"
+    image.save(temp_img)
+
+    damage_img = RLImage(temp_img, width=4*inch, height=3*inch)
+    damage_img.hAlign = 'CENTER'
+    elements.append(damage_img)
+
+    doc.build(elements)
+
+    return pdf_path
+
+
+# =================================================
 # INITIAL SETUP
-# -------------------------------------------------
+# =================================================
 
 st.set_page_config(page_title="Insurance Saathi", page_icon="🚗", layout="centered")
 
-# Initialize database (auto create + auto generate 1000 policies)
-init_db()
+init_db()  # Auto-create SQLite DB & policies
 
-# -------------------------------------------------
+
+# =================================================
 # SESSION STATE INITIALIZATION
-# -------------------------------------------------
+# =================================================
 
 if "policy_valid" not in st.session_state:
     st.session_state.policy_valid = False
@@ -57,16 +114,16 @@ if "image" not in st.session_state:
     st.session_state.image = None
 
 
-# -------------------------------------------------
+# =================================================
 # SIDEBAR NAVIGATION
-# -------------------------------------------------
+# =================================================
 
 page = st.sidebar.selectbox("Navigation", ["Insurance Portal", "Admin Dashboard"])
 
 
-# -------------------------------------------------
-# LOAD YOLO MODEL (Cached)
-# -------------------------------------------------
+# =================================================
+# LOAD YOLO MODEL
+# =================================================
 
 @st.cache_resource
 def load_model():
@@ -76,17 +133,24 @@ model = load_model()
 
 
 # =================================================
-# =============== INSURANCE PORTAL ===============
+# INSURANCE PORTAL
 # =================================================
 
 if page == "Insurance Portal":
 
-    # ---------------- HEADER ----------------
-    col1, col2, col3 = st.columns([1,2,1])
+    # ---------------- CENTERED LOGO ----------------
 
-    with col2:
-        logo = PILImage.open("assets/Insurance_saathi logo.png")
-        st.image(logo, width=150)
+    with open("assets/Insurance_saathi logo.png", "rb") as img_file:
+        encoded = base64.b64encode(img_file.read()).decode()
+
+    st.markdown(
+        f"""
+        <div style='text-align: center;'>
+            <img src='data:image/png;base64,{encoded}' width='150'/>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     st.markdown("<h1 style='text-align:center;'>Insurance Saathi</h1>", unsafe_allow_html=True)
     st.markdown(
@@ -189,11 +253,11 @@ if page == "Insurance Portal":
                     st.session_state.confidence
                 )
 
-                ticket_id = create_ticket(claim_id)
+                create_ticket(claim_id)
 
                 st.success(f"🎫 Claim Created Successfully! Claim ID: {claim_id}")
 
-                generate_pdf(
+                pdf_path = generate_pdf(
                     claim_id,
                     st.session_state.policy_id,
                     st.session_state.damage_class,
@@ -201,12 +265,20 @@ if page == "Insurance Portal":
                     st.session_state.image
                 )
 
+                with open(pdf_path, "rb") as f:
+                    st.download_button(
+                        "📄 Download Claim Report",
+                        data=f,
+                        file_name=pdf_path,
+                        mime="application/pdf"
+                    )
+
         elif choice == "No":
             st.info("Thank you for using Insurance Saathi 🚗")
 
 
 # =================================================
-# =============== ADMIN DASHBOARD ===============
+# ADMIN DASHBOARD
 # =================================================
 
 if page == "Admin Dashboard":
@@ -241,63 +313,3 @@ if page == "Admin Dashboard":
     st.dataframe(cursor.fetchall())
 
     conn.close()
-
-
-# =================================================
-# =============== PDF FUNCTION ===============
-# =================================================
-
-def generate_pdf(claim_id, policy_id, damage_class, confidence, image):
-
-    pdf_path = f"claim_{claim_id}.pdf"
-    doc = SimpleDocTemplate(pdf_path)
-    elements = []
-
-    styles = getSampleStyleSheet()
-
-    centered = ParagraphStyle(
-        name="Centered",
-        parent=styles["Heading1"],
-        alignment=1,
-        textColor=colors.HexColor("#0A84FF")
-    )
-
-    subtitle = ParagraphStyle(
-        name="Subtitle",
-        parent=styles["Normal"],
-        alignment=1,
-        textColor=colors.grey
-    )
-
-    logo = RLImage("assets/Insurance_saathi logo.png", width=1.5*inch, height=1.5*inch)
-    logo.hAlign = 'CENTER'
-    elements.append(logo)
-    elements.append(Spacer(1, 0.3 * inch))
-
-    elements.append(Paragraph("Insurance Saathi", centered))
-    elements.append(Paragraph("AI Powered Car Insurance Automation System", subtitle))
-    elements.append(Spacer(1, 0.5 * inch))
-
-    elements.append(Paragraph(f"<b>Policy ID:</b> {policy_id}", styles["Normal"]))
-    elements.append(Paragraph(f"<b>Damage Type:</b> {damage_class}", styles["Normal"]))
-    elements.append(Paragraph(f"<b>Confidence:</b> {round(confidence,2)}", styles["Normal"]))
-    elements.append(Paragraph(f"<b>Claim ID:</b> {claim_id}", styles["Normal"]))
-    elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%d-%m-%Y %H:%M')}", styles["Normal"]))
-    elements.append(Spacer(1, 0.5 * inch))
-
-    temp_img = f"damage_{claim_id}.jpg"
-    image.save(temp_img)
-
-    damage_img = RLImage(temp_img, width=4*inch, height=3*inch)
-    damage_img.hAlign = 'CENTER'
-    elements.append(damage_img)
-
-    doc.build(elements)
-
-    with open(pdf_path, "rb") as f:
-        st.download_button(
-            "📄 Download Claim Report",
-            data=f,
-            file_name=pdf_path,
-            mime="application/pdf"
-        )
