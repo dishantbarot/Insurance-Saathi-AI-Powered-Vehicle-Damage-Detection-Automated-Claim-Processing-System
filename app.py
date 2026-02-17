@@ -1,6 +1,7 @@
 """
 Insurance Saathi
 AI Powered Vehicle Damage Detection & Claim Automation
+Production Enhanced Version
 """
 
 # =================================================
@@ -22,7 +23,6 @@ from backend import (
 from PIL import Image as PILImage
 from datetime import datetime
 
-# PDF
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -30,15 +30,15 @@ from reportlab.lib import colors
 
 
 # =================================================
-# PDF FUNCTION (DEFINED FIRST TO AVOID NameError)
+# PDF FUNCTION
 # =================================================
 
-def generate_pdf(claim_id, policy_id, damage_class, confidence, image):
+def generate_pdf(claim_id, policy_id, damage_class, confidence,
+                 damage_percent, approval_score, claim_status, image):
 
     pdf_path = f"claim_{claim_id}.pdf"
     doc = SimpleDocTemplate(pdf_path)
     elements = []
-
     styles = getSampleStyleSheet()
 
     centered = ParagraphStyle(
@@ -55,22 +55,22 @@ def generate_pdf(claim_id, policy_id, damage_class, confidence, image):
         textColor=colors.grey
     )
 
-    # Centered Logo
     logo = RLImage("assets/Insurance_saathi logo.png", width=1.5*inch, height=1.5*inch)
     logo.hAlign = 'CENTER'
     elements.append(logo)
     elements.append(Spacer(1, 0.3 * inch))
 
-    # Title & Subtitle
     elements.append(Paragraph("Insurance Saathi", centered))
     elements.append(Paragraph("AI Powered Car Insurance Automation System", subtitle))
     elements.append(Spacer(1, 0.5 * inch))
 
     elements.append(Paragraph(f"<b>Policy ID:</b> {policy_id}", styles["Normal"]))
     elements.append(Paragraph(f"<b>Damage Type:</b> {damage_class}", styles["Normal"]))
-    elements.append(Paragraph(f"<b>Confidence:</b> {round(confidence,2)}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Model Confidence:</b> {round(confidence*100,2)}%", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Damage Coverage:</b> {round(damage_percent,2)}%", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Approval Score:</b> {round(approval_score,2)}%", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Status:</b> {claim_status}", styles["Normal"]))
     elements.append(Paragraph(f"<b>Claim ID:</b> {claim_id}", styles["Normal"]))
-    elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%d-%m-%Y %H:%M')}", styles["Normal"]))
     elements.append(Spacer(1, 0.5 * inch))
 
     temp_img = f"damage_{claim_id}.jpg"
@@ -90,41 +90,19 @@ def generate_pdf(claim_id, policy_id, damage_class, confidence, image):
 # =================================================
 
 st.set_page_config(page_title="Insurance Saathi", page_icon="🚗", layout="centered")
+init_db()
 
-init_db()  # Auto-create SQLite DB & policies
+# Session state
+for key in ["policy_valid", "policy_id", "damage_class",
+            "confidence", "damage_percent",
+            "approval_score", "claim_status", "image"]:
+    if key not in st.session_state:
+        st.session_state[key] = None
 
-
-# =================================================
-# SESSION STATE INITIALIZATION
-# =================================================
-
-if "policy_valid" not in st.session_state:
-    st.session_state.policy_valid = False
-
-if "policy_id" not in st.session_state:
-    st.session_state.policy_id = None
-
-if "damage_class" not in st.session_state:
-    st.session_state.damage_class = None
-
-if "confidence" not in st.session_state:
-    st.session_state.confidence = None
-
-if "image" not in st.session_state:
-    st.session_state.image = None
-
-
-# =================================================
-# SIDEBAR NAVIGATION
-# =================================================
-
+# Sidebar
 page = st.sidebar.selectbox("Navigation", ["Insurance Portal", "Admin Dashboard"])
 
-
-# =================================================
-# LOAD YOLO MODEL
-# =================================================
-
+# Load Model
 @st.cache_resource
 def load_model():
     return YOLO("model/best.pt")
@@ -138,17 +116,12 @@ model = load_model()
 
 if page == "Insurance Portal":
 
-    # ---------------- CENTERED LOGO ----------------
-
+    # Centered Logo
     with open("assets/Insurance_saathi logo.png", "rb") as img_file:
         encoded = base64.b64encode(img_file.read()).decode()
 
     st.markdown(
-        f"""
-        <div style='text-align: center;'>
-            <img src='data:image/png;base64,{encoded}' width='150'/>
-        </div>
-        """,
+        f"<div style='text-align:center;'><img src='data:image/png;base64,{encoded}' width='150'></div>",
         unsafe_allow_html=True
     )
 
@@ -160,10 +133,8 @@ if page == "Insurance Portal":
 
     st.markdown("---")
 
-    # ---------------- POLICY VALIDATION ----------------
-
+    # POLICY VALIDATION
     st.subheader("🔎 Policy Verification")
-
     policy_number = st.text_input("Enter Policy Number")
 
     if st.button("Validate Policy"):
@@ -187,60 +158,90 @@ if page == "Insurance Portal":
             st.session_state.policy_valid = False
             st.session_state.policy_id = None
 
-
-    # ---------------- DAMAGE DETECTION ----------------
-
+    # DAMAGE DETECTION
     if st.session_state.policy_valid:
 
         st.markdown("---")
         st.subheader("📸 Upload Damage Image")
 
-        uploaded_file = st.file_uploader("Upload vehicle damage image", type=["jpg", "jpeg", "png"])
+        uploaded_file = st.file_uploader("Upload vehicle damage image", type=["jpg","jpeg","png"])
 
         if uploaded_file is not None:
 
-            try:
-                image = PILImage.open(uploaded_file).convert("RGB")
-                image_np = np.array(image)
+            image = PILImage.open(uploaded_file).convert("RGB")
+            image_np = np.array(image)
 
-                results = model(image_np)
-                result = results[0]
+            results = model(image_np)
+            result = results[0]
 
-                if result.boxes is not None and len(result.boxes) > 0:
+            if result.boxes is not None and len(result.boxes) > 0:
 
-                    boxes = result.boxes
-                    cls_id = int(boxes.cls[0])
-                    confidence = float(boxes.conf[0])
-                    class_name = model.names[cls_id]
+                boxes = result.boxes
+                cls_id = int(boxes.cls[0])
+                confidence = float(boxes.conf[0])
+                class_name = model.names[cls_id]
 
-                    st.image(result.plot(), width="stretch")
+                st.image(result.plot(), width="stretch")
 
-                    st.success(f"Damage Detected: {class_name}")
-                    st.write(f"Confidence Score: {round(confidence, 2)}")
+                # DAMAGE %
+                img_h, img_w = image_np.shape[:2]
+                total_area = img_h * img_w
+                damage_area = 0
 
-                    st.session_state.damage_class = class_name
-                    st.session_state.confidence = confidence
-                    st.session_state.image = image
+                for box in boxes.xyxy:
+                    x1, y1, x2, y2 = box
+                    damage_area += (x2 - x1) * (y2 - y1)
 
+                damage_percent = float((damage_area / total_area) * 100)
+
+                # CLAIM APPROVAL SCORE
+                approval_score = (
+                    confidence * 100 * 0.6 +
+                    damage_percent * 0.4
+                )
+
+                # STATUS LOGIC
+                if approval_score >= 70:
+                    claim_status = "Approved"
+                    badge_color = "green"
+                elif approval_score >= 50:
+                    claim_status = "Under Review"
+                    badge_color = "orange"
                 else:
-                    st.warning("No visible damage detected.")
+                    claim_status = "Rejected"
+                    badge_color = "red"
 
-            except Exception as e:
-                st.error("Error processing image.")
-                st.exception(e)
+                # Store session
+                st.session_state.damage_class = class_name
+                st.session_state.confidence = confidence
+                st.session_state.damage_percent = damage_percent
+                st.session_state.approval_score = approval_score
+                st.session_state.claim_status = claim_status
+                st.session_state.image = image
 
+                # DISPLAY
+                st.success(f"Damage Detected: {class_name}")
+                st.progress(int(confidence*100))
+                st.write(f"Model Confidence: {round(confidence*100,2)}%")
 
-    # ---------------- CLAIM DECISION ----------------
+                st.progress(int(damage_percent))
+                st.write(f"Damage Coverage: {round(damage_percent,2)}%")
 
+                st.progress(int(min(approval_score,100)))
+                st.write(f"Claim Approval Score: {round(approval_score,2)}%")
+
+                st.markdown(
+                    f"<h3 style='color:{badge_color};'>Status: {claim_status}</h3>",
+                    unsafe_allow_html=True
+                )
+
+    # CLAIM SUBMISSION
     if (
         st.session_state.policy_valid
-        and st.session_state.policy_id is not None
         and st.session_state.damage_class is not None
     ):
 
         st.markdown("---")
-        st.subheader("📝 Claim Decision")
-
         choice = st.radio("Proceed with claim?", ["Select", "Yes", "No"])
 
         if choice == "Yes":
@@ -255,23 +256,24 @@ if page == "Insurance Portal":
 
                 create_ticket(claim_id)
 
-                st.success(f"🎫 Claim Created Successfully! Claim ID: {claim_id}")
+                st.success(f"🎫 Claim Created! ID: {claim_id}")
 
                 pdf_path = generate_pdf(
                     claim_id,
                     st.session_state.policy_id,
                     st.session_state.damage_class,
                     st.session_state.confidence,
+                    st.session_state.damage_percent,
+                    st.session_state.approval_score,
+                    st.session_state.claim_status,
                     st.session_state.image
                 )
 
                 with open(pdf_path, "rb") as f:
-                    st.download_button(
-                        "📄 Download Claim Report",
-                        data=f,
-                        file_name=pdf_path,
-                        mime="application/pdf"
-                    )
+                    st.download_button("📄 Download Claim Report",
+                                       data=f,
+                                       file_name=pdf_path,
+                                       mime="application/pdf")
 
         elif choice == "No":
             st.info("Thank you for using Insurance Saathi 🚗")
