@@ -1,0 +1,4 @@
+ streamlit 
+ ultralytics 
+ reportlab 
+ pillow
