@@ -1,7 +1,8 @@
-streamlit
-ultralytics
+streamlit==1.55.0
+ultralytics==8.3.0
 torch
-opencv-python-headless
+torchvision
+opencv-python-headless==4.8.1.78
 pillow
 reportlab
 numpy
