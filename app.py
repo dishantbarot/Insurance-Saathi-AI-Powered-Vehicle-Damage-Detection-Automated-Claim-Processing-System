@@ -14,9 +14,12 @@ import sqlite3
 import base64
 import os
 
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 from ultralytics import YOLO
+
 from backend import (
     init_db,
     validate_policy,
@@ -185,7 +188,7 @@ if page == "Insurance Portal":
                 confidence = float(boxes.conf[0])
                 class_name = model.names[cls_id]
 
-                st.image(result.plot(), width="stretch")
+                st.image(result.plot(), use_container_width=True)
 
                 # DAMAGE %
                 img_h, img_w = image_np.shape[:2]
@@ -319,4 +322,5 @@ if page == "Admin Dashboard":
     st.dataframe(cursor.fetchall())
 
     conn.close()
+
 
