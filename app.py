@@ -12,6 +12,10 @@ import streamlit as st
 import numpy as np
 import sqlite3
 import base64
+import os
+
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"
+
 from ultralytics import YOLO
 from backend import (
     init_db,
@@ -315,3 +319,4 @@ if page == "Admin Dashboard":
     st.dataframe(cursor.fetchall())
 
     conn.close()
+
