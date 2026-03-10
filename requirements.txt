@@ -1,7 +1,7 @@
 streamlit
 ultralytics
-reportlab
-pillow
-numpy
-opencv-python-headless
 torch
+opencv-python-headless
+pillow
+reportlab
+numpy
